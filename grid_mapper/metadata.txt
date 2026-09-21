@@ -1,0 +1,29 @@
+[general]
+name=Grid Mapper - Substation Detector
+qgisMinimumVersion=3.22
+qgisMaximumVersion=4.99
+supportsQt6=True
+description=Detect and map electrical substations from satellite / aerial imagery with deep learning (TFLite SSD-MobileNet / EfficientDet or Roboflow models), build training datasets and validate results.
+version=1.2.0
+author=Danson Mugambi (Bohemian Renewables)
+email=mugambidanson@gmail.com
+about=Grid Mapper packages the workflow from the MSc Data Science thesis "Investigating the use of Deep learning tools to Map substations in Kenya" (MSc Data Science, University of East London, 2023) as QGIS Processing tools:
+    0) Map the grid: type a place (e.g. Zambia) and get power lines, substations, towers and plants from OpenStreetMap plus an AI scan of the latest satellite imagery for substations missing from the map.
+    1) Extract georeferenced training chips (750 x 750 px, world file + Pascal VOC / YOLO labels) around known substations.
+    2) Detect substations over any area of interest from any raster or XYZ basemap using the trained TensorFlow Lite models (SSD-MobileNet-V2-FPNLite-320, EfficientDet) exported from Google Colab.
+    3) Detect substations with the hosted Roboflow models (object detection, instance or semantic segmentation).
+    4) Validate detections against a reference substation layer (precision, recall, F1).
+    Local TFLite inference needs one extra Python package: ai-edge-litert (or tflite-runtime / tensorflow). See README.
+tracker=https://github.com/MugambiD/qgis-grid-mapper/issues
+repository=https://github.com/MugambiD/qgis-grid-mapper
+homepage=https://github.com/MugambiD/qgis-grid-mapper
+category=Raster
+icon=icons/icon.png
+tags=substation,grid,power,electricity,energy,deep learning,object detection,tflite,roboflow,remote sensing,satellite,renewable energy
+experimental=False
+deprecated=False
+hasProcessingProvider=yes
+server=False
+changelog=1.2.0 New 'Map the grid' tool: type a place, get OSM grid layers + AI substation scan.
+    1.1.0 QGIS 4 / Qt6 support.
+    1.0.0 First release: chip extraction, TFLite detection, Roboflow detection, validation.
