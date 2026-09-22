@@ -1,32 +1,34 @@
-name: Build plugin zip
+name: Build plugin release
 
 on:
   push:
-    tags: ["v*"]
+    tags:
+      - 'v*'
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Lint
-        run: pip install pyflakes && python -m pyflakes grid_mapper
-      - name: Package
-        run: |
-          VERSION=$(grep '^version=' grid_mapper/metadata.txt | cut -d= -f2)
-          cp LICENSE grid_mapper/LICENSE
-          zip -r "grid_mapper-${VERSION}.zip" grid_mapper -x '*__pycache__*' '*.pyc'
-          echo "ZIP=grid_mapper-${VERSION}.zip" >> $GITHUB_ENV
-      - uses: actions/upload-artifact@v4
+      - uses: actions/setup-python@v5
         with:
-          name: grid_mapper
-          path: ${{ env.ZIP }}
-      - name: Attach to release
+          python-version: '3.12'
+      - name: Test
+        run: |
+          python -m compileall -q grid_mapper
+          python -m unittest discover -s grid_mapper/tests -v
+      - name: Build QGIS plugin zip
+        run: python scripts/build_release.py
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: grid-mapper-plugin
+          path: dist/grid_mapper-*.zip
+      - name: Attach to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.ZIP }}
+          files: dist/grid_mapper-*.zip
