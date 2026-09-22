@@ -1,0 +1,22 @@
+name: Plugin quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pure-python-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile Python sources
+        run: python -m compileall -q grid_mapper
+      - name: Run pure-Python unit tests
+        run: python -m unittest discover -s grid_mapper/tests -v
+      - name: Validate release package structure
+        run: python scripts/build_release.py --check-only
