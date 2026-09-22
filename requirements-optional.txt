@@ -1,0 +1,4 @@
+# Optional inference runtimes. Install into the Python environment used by QGIS.
+# Pin numpy to the version supplied by your QGIS installation when installing.
+onnxruntime
+ai-edge-litert

@@ -44,7 +44,7 @@ def load_interpreter_class():
 
 
 def resolve_model(path, cache_dir):
-    """Accept a .tflite file, a folder or a .zip. Return (tflite_path, labelmap_path|None)."""
+    """Accept a .tflite / .onnx file, a folder or a .zip. Return (model_path, labelmap_path|None)."""
     if not path:
         raise FileNotFoundError("No model file given")
     path = os.path.abspath(path)
@@ -58,19 +58,23 @@ def resolve_model(path, cache_dir):
             os.makedirs(folder, exist_ok=True)
             with zipfile.ZipFile(path) as zf:
                 for member in zf.namelist():
-                    if member.lower().endswith((".tflite", ".txt", ".pbtxt")) and ".." not in member:
+                    if member.lower().endswith((".tflite", ".onnx", ".json", ".txt", ".pbtxt")) and ".." not in member:
                         zf.extract(member, folder)
-    elif path.lower().endswith(".tflite"):
+    elif path.lower().endswith((".tflite", ".onnx")):
         labels = _find_file(os.path.dirname(path), ("labelmap.txt", "labels.txt"))
         return path, labels
     else:
-        raise ValueError(f"Unsupported model file: {path} (use .zip, .tflite or a folder)")
+        raise ValueError(f"Unsupported model file: {path} (use .onnx, .tflite, a .zip or a folder)")
 
-    tflites = []
+    tflites, onnxs = [], []
     for root, _dirs, files in os.walk(folder):
         tflites += [os.path.join(root, f) for f in files if f.lower().endswith(".tflite")]
+        onnxs += [os.path.join(root, f) for f in files if f.lower().endswith(".onnx")]
+    if onnxs:  # ONNX (RF-DETR / YOLO) takes precedence when a package contains both
+        onnxs.sort(key=lambda p: -os.path.getsize(p))
+        return onnxs[0], _find_file(os.path.dirname(onnxs[0]), ("labelmap.txt", "labels.txt"))
     if not tflites:
-        raise FileNotFoundError(f"No .tflite model found in {path}")
+        raise FileNotFoundError(f"No .tflite or .onnx model found in {path}")
     # prefer detect.tflite (Colab export name), else the largest file
     tflites.sort(key=lambda p: (os.path.basename(p).lower() != "detect.tflite", -os.path.getsize(p)))
     model = tflites[0]
@@ -202,3 +206,20 @@ class TFLiteDetector:
             out.append({"ymin": ymin, "xmin": xmin, "ymax": ymax, "xmax": xmax,
                         "score": float(score), "label": label})
         return out
+
+
+def load_local_detector(path, labels_path=None, num_threads=4, cache_dir=""):
+    """Open a local model (TFLite SSD / EfficientDet, or ONNX RF-DETR / YOLO).
+
+    Returns (detector, model_file). Detectors expose .detect(rgb, min_score),
+    .input_size, .backend, .labels and optional .arch / .segmentation.
+    """
+    model_file, found_labels = resolve_model(path, cache_dir)
+    labels = read_labels(labels_path or found_labels)
+    if model_file.lower().endswith(".onnx"):
+        from .onnx_detector import OnnxDetector
+        return OnnxDetector(model_file, labels or None, num_threads), model_file
+    det = TFLiteDetector(model_file, labels or ["substation"], num_threads)
+    det.arch = "tflite-ssd"
+    det.segmentation = False
+    return det, model_file

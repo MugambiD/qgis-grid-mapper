@@ -17,25 +17,30 @@ def _post(url, body, content_type="application/x-www-form-urlencoded", timeout_m
         from qgis.core import QgsBlockingNetworkRequest
         from qgis.PyQt.QtCore import QByteArray, QUrl
         from qgis.PyQt.QtNetwork import QNetworkRequest
+    except ImportError as exc:  # pragma: no cover - hosted inference runs inside QGIS
+        raise RuntimeError("QGIS network APIs are unavailable") from exc
 
-        req = QNetworkRequest(QUrl(url))
-        req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, content_type)
-        try:
-            req.setTransferTimeout(timeout_ms)
-        except AttributeError:
-            pass
-        blocking = QgsBlockingNetworkRequest()
-        err = blocking.post(req, QByteArray(body))
-        reply = blocking.reply()
-        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
-        content = bytes(reply.content())
-        if not content:
-            raise RuntimeError(blocking.errorMessage() or f"No response (error code {err})")
-    except ImportError:  # outside QGIS (tests)
-        import urllib.request
-        r = urllib.request.Request(url, data=body, headers={"Content-Type": content_type})
-        with urllib.request.urlopen(r, timeout=timeout_ms / 1000) as resp:  # noqa: S310
-            status, content = resp.status, resp.read()
+    req = QNetworkRequest(QUrl(url))
+    try:  # Qt6 / QGIS 4
+        content_type_header = QNetworkRequest.KnownHeaders.ContentTypeHeader
+    except AttributeError:  # Qt5 / QGIS 3
+        content_type_header = QNetworkRequest.ContentTypeHeader
+    req.setHeader(content_type_header, content_type)
+    try:
+        req.setTransferTimeout(timeout_ms)
+    except AttributeError:
+        pass
+    blocking = QgsBlockingNetworkRequest()
+    err = blocking.post(req, QByteArray(body))
+    reply = blocking.reply()
+    try:  # Qt6 / QGIS 4
+        status_attr = QNetworkRequest.Attribute.HttpStatusCodeAttribute
+    except AttributeError:  # Qt5 / QGIS 3
+        status_attr = QNetworkRequest.HttpStatusCodeAttribute
+    status = reply.attribute(status_attr)
+    content = bytes(reply.content())
+    if not content:
+        raise RuntimeError(blocking.errorMessage() or f"No response (error code {err})")
     try:
         data = json.loads(content.decode("utf-8"))
     except ValueError as exc:

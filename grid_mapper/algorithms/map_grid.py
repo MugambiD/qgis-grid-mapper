@@ -1,8 +1,10 @@
 """'Map the grid' - one-click grid mapping for a named place (country, province, district)."""
 import math
+import os
 import urllib.parse
 
 from qgis.core import (
+    QgsApplication,
     QgsCategorizedSymbolRenderer,
     QgsCoordinateReferenceSystem,
     QgsCoordinateTransform,
@@ -37,6 +39,7 @@ from qgis.core import (
 from qgis.PyQt.QtGui import QIcon
 
 from ..core import osm
+from ..core.model_registry import active_model_path, default_registry_dir
 from ..core.compat import (FAST_INSERT, FILE_BEHAVIOR, NUM_DOUBLE, NUM_INT, SRC_POLYGON, WKB_LINESTRING,
                            WKB_POINT, WKB_POLYGON, advanced, make_field)
 from .base_detect import ICON, tr
@@ -45,7 +48,7 @@ from .detect_tflite import DetectSubstationsTFLite
 
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
 
-LAYER_OPTIONS = ["substations", "lines", "towers", "plants"]
+LAYER_OPTIONS = ["substations", "lines", "towers", "plants", "poles"]
 IMAGERY = [
     ("Esri World Imagery (latest)",
      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", 19),
@@ -69,9 +72,13 @@ def utm_for(lon, lat):
 def geometry_from_geojson(gj):
     if not gj:
         return None
+    import contextlib
     import json
+
     from osgeo import ogr
-    g = ogr.CreateGeometryFromJson(json.dumps(gj))
+    ctx = ogr.ExceptionMgr(useExceptions=False) if hasattr(ogr, "ExceptionMgr") else contextlib.nullcontext()
+    with ctx:
+        g = ogr.CreateGeometryFromJson(json.dumps(gj))
     if g is None:
         return None
     geom = QgsGeometry.fromWkt(g.ExportToWkt())
@@ -119,7 +126,8 @@ class _StylePostProcessor(QgsProcessingLayerPostProcessorInterface):
         else:
             props = {
                 "osm_subs": {"name": "square", "color": "#1f78b4", "size": "2.6", "outline_color": "white"},
-                "towers": {"name": "circle", "color": "#555555", "size": "0.9", "outline_style": "no"},
+                "towers": {"name": "diamond", "color": "#555555", "size": "1.2", "outline_color": "white"},
+                "poles": {"name": "circle", "color": "#888888", "size": "0.7", "outline_style": "no"},
                 "plants": {"name": "triangle", "color": "#33a02c", "size": "3.2", "outline_color": "white"},
             }.get(k)
             if props:
@@ -149,6 +157,7 @@ class MapGrid(QgsProcessingAlgorithm):
     OUT_OSM_SUBS = "OSM_SUBSTATIONS"
     OUT_LINES = "LINES"
     OUT_TOWERS = "TOWERS"
+    OUT_POLES = "POLES"
     OUT_PLANTS = "PLANTS"
     OUT_ZONES = "SCAN_ZONES"
 
@@ -176,7 +185,7 @@ class MapGrid(QgsProcessingAlgorithm):
             "district - pick the grid layers and press <b>Run</b>. The tool:</p><ol>"
             "<li>finds the boundary of the place (OpenStreetMap Nominatim);</li>"
             "<li>downloads the known grid for it from OpenStreetMap - transmission lines with voltage, "
-            "substations, towers / poles and power plants;</li>"
+            "substations and power plants; optional tower/pole layers are fetched separately;</li>"
             "<li>builds <b>scan zones</b> where substations are likely: around cities and towns, at line "
             "ends and junctions, and around known substations;</li>"
             "<li>scans those zones on the latest satellite imagery with your deep-learning model "
@@ -184,9 +193,12 @@ class MapGrid(QgsProcessingAlgorithm):
             "<p>Run first with <b>Estimate only</b> ticked to see how many image tiles the scan needs "
             "(a country can need several thousand; roughly 1 s per tile). Lower the zone radii or pick a "
             "province to go faster.</p>"
-            "<p>Lines, towers and plants come from OpenStreetMap; the AI model finds substations. "
-            "OSM coverage varies, so treat all layers as a starting point for field / utility "
-            "verification. Respect the imagery provider's terms of use.</p>")
+            "<p><b>Public-server reliability:</b> tower and pole layers are off by default. If selected, "
+            "they are downloaded in small cells and failures are non-fatal. Distribution poles can be very large "
+            "datasets, so use a district or small AOI.</p>"
+            "<p>Grid assets come from OpenStreetMap; the AI model only finds candidate substations. OSM coverage "
+            "varies, so treat all layers as a starting point for field / utility verification. Respect the imagery "
+            "provider's terms of use.</p>")
 
     def initAlgorithm(self, config=None):  # noqa: N802
         self.addParameter(QgsProcessingParameterString(self.PLACE, tr("Place to map (country, province, district)"),
@@ -195,9 +207,10 @@ class MapGrid(QgsProcessingAlgorithm):
             self.AOI, tr("…or use my own area polygon instead (optional)"), [SRC_POLYGON], optional=True))
         self.addParameter(QgsProcessingParameterEnum(
             self.LAYERS, tr("Grid layers to map"),
-            [tr("Substations (AI scan + OSM)"), tr("Transmission / distribution lines"),
-             tr("Towers and poles"), tr("Power plants")],
-            allowMultiple=True, defaultValue=[0, 1, 2, 3]))
+            [tr("Substations (OSM + optional AI scan)"), tr("Transmission / distribution lines"),
+             tr("Transmission towers (optional; slower OSM query)"), tr("Power plants"),
+             tr("Distribution poles (very large; off by default)")],
+            allowMultiple=True, defaultValue=[0, 1, 3]))
         self.addParameter(QgsProcessingParameterEnum(
             self.IMAGERY, tr("Satellite imagery"), [i[0] for i in IMAGERY], defaultValue=0))
         self.addParameter(QgsProcessingParameterRasterLayer(
@@ -205,12 +218,12 @@ class MapGrid(QgsProcessingAlgorithm):
             optional=True))
         self.addParameter(QgsProcessingParameterEnum(
             self.DETECTOR, tr("Substation detector"),
-            [tr("TFLite model (offline, custom_model_lite.zip)"), tr("Roboflow hosted model (API key)"),
-             tr("No AI scan - OpenStreetMap data only")], defaultValue=0))
+            [tr("Local model (offline: ONNX RF-DETR / YOLO or TFLite)"), tr("Roboflow hosted model (API key)"),
+             tr("No AI scan - OpenStreetMap data only")], defaultValue=2))
         self.addParameter(QgsProcessingParameterFile(
-            self.MODEL, tr("TFLite model (custom_model_lite.zip or detect.tflite)"),
-            behavior=FILE_BEHAVIOR, fileFilter="TFLite model (*.zip *.tflite)", optional=True))
-        self.addParameter(QgsProcessingParameterString(self.API_KEY, tr("Roboflow API key"), "", optional=True))
+            self.MODEL, tr("Local model (.onnx, .tflite or model .zip)"),
+            behavior=FILE_BEHAVIOR, fileFilter="Detection model (*.onnx *.zip *.tflite)", optional=True))
+        self.addParameter(QgsProcessingParameterString(self.API_KEY, tr("Roboflow API key (optional; prefer ROBOFLOW_API_KEY env var)"), "", optional=True))
         self.addParameter(QgsProcessingParameterBoolean(
             self.ESTIMATE_ONLY, tr("Estimate only (download OSM data and count tiles, no AI scan)"), False))
         self.addParameter(advanced(QgsProcessingParameterString(self.RF_MODEL, tr("Roboflow model ID"), "ss-2")))
@@ -236,18 +249,30 @@ class MapGrid(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterFeatureSink(
             self.OUT_LINES, tr("Power lines (OpenStreetMap)"), optional=True))
         self.addParameter(QgsProcessingParameterFeatureSink(
-            self.OUT_TOWERS, tr("Towers and poles (OpenStreetMap)"), optional=True))
+            self.OUT_TOWERS, tr("Transmission towers (OpenStreetMap)"), optional=True))
+        self.addParameter(QgsProcessingParameterFeatureSink(
+            self.OUT_POLES, tr("Distribution poles (OpenStreetMap)"), optional=True))
         self.addParameter(QgsProcessingParameterFeatureSink(
             self.OUT_PLANTS, tr("Power plants (OpenStreetMap)"), optional=True))
         self.addParameter(QgsProcessingParameterFeatureSink(
             self.OUT_ZONES, tr("AI scan zones"), optional=True))
-        for key in ("N_AI", "N_AI_NEW", "N_OSM_SUBSTATIONS", "N_LINES", "LINE_KM", "N_TOWERS", "N_PLANTS", "TILES"):
+        for key in ("N_AI", "N_AI_NEW", "N_OSM_SUBSTATIONS", "N_LINES", "LINE_KM", "N_TOWERS",
+                    "N_POLES", "N_PLANTS", "TILES"):
             self.addOutput(QgsProcessingOutputNumber(key, key))
 
     # ------------------------------------------------------------------
     def prepareAlgorithm(self, parameters, context, feedback):  # noqa: N802
-        """Main thread: build the imagery layer and the detector instance."""
+        """Main thread: create imagery only when an AI detector actually needs it."""
         self._detector_kind = DETECTORS[self.parameterAsEnum(parameters, self.DETECTOR, context)]
+        self._child = None
+        self._imagery = None
+        self._imagery_name = ""
+
+        # The public/default OSM-only mode must work without imagery, model files,
+        # optional runtimes or third-party API credentials.
+        if self._detector_kind == "none":
+            return True
+
         choice = self.parameterAsEnum(parameters, self.IMAGERY, context)
         name, url, zmax = IMAGERY[choice]
         if url is None:
@@ -261,7 +286,7 @@ class MapGrid(QgsProcessingAlgorithm):
             self._imagery_name = name
         if not self._imagery.isValid():
             raise QgsProcessingException(tr(f"Could not open imagery '{self._imagery_name}'"))
-        self._child = None
+
         if self._detector_kind == "tflite":
             self._child = DetectSubstationsTFLite().create()
         elif self._detector_kind == "roboflow":
@@ -282,7 +307,24 @@ class MapGrid(QgsProcessingAlgorithm):
     def processAlgorithm(self, parameters, context, feedback):  # noqa: N802
         layers = {LAYER_OPTIONS[i] for i in self.parameterAsEnums(parameters, self.LAYERS, context)}
         estimate_only = self.parameterAsBool(parameters, self.ESTIMATE_ONLY, context)
-        want_ai = "substations" in layers and self._child is not None and not estimate_only
+        ai_ready = self._child is not None
+        if ai_ready and self._detector_kind == "tflite" and not estimate_only:
+            selected = self.parameterAsFile(parameters, self.MODEL, context)
+            if not selected:
+                registry = default_registry_dir(QgsApplication.qgisSettingsDirPath())
+                if not active_model_path(registry):
+                    ai_ready = False
+                    feedback.pushWarning(tr(
+                        "No local AI model is configured. Grid Mapper will return the OpenStreetMap grid "
+                        "instead of failing. Select a model or register an active model to enable AI."))
+        if ai_ready and self._detector_kind == "roboflow" and not estimate_only:
+            key = self.parameterAsString(parameters, self.API_KEY, context) or os.environ.get("ROBOFLOW_API_KEY", "")
+            if not key:
+                ai_ready = False
+                feedback.pushWarning(tr(
+                    "Roboflow AI was selected but no API key is configured. Grid Mapper will return the "
+                    "OpenStreetMap grid instead of failing."))
+        want_ai = "substations" in layers and ai_ready and not estimate_only
         multi = QgsProcessingMultiStepFeedback(3, feedback)
         tctx = context.transformContext()
 
@@ -326,23 +368,42 @@ class MapGrid(QgsProcessingAlgorithm):
         # 2 -- OpenStreetMap grid data ---------------------------------------
         multi.setCurrentStep(0)
         need_lines = "lines" in layers or want_ai or estimate_only
+        cache_dir = os.path.join(QgsApplication.qgisSettingsDirPath(), "grid_mapper", "osm_cache")
         query = osm.build_query(place, want_lines=need_lines,
                                 want_substations="substations" in layers,
-                                want_plants="plants" in layers, want_towers="towers" in layers,
+                                want_plants="plants" in layers, want_towers=False, want_poles=False,
                                 want_towns=want_ai or estimate_only)
-        try:
-            data = osm.overpass(query, feedback)
-        except Exception as exc:  # noqa: BLE001
-            raise QgsProcessingException(tr(f"OpenStreetMap download failed: {exc}")) from exc
+        data = {"elements": []}
+        if query:
+            try:
+                data = osm.overpass(query, feedback, cache_dir, "lines, substations and plants")
+            except Exception as exc:  # noqa: BLE001
+                raise QgsProcessingException(tr(f"OpenStreetMap core-grid download failed: {exc}")) from exc
+
+        # Heavy node layers are independent and non-fatal. Fetching them in bbox
+        # cells avoids one enormous public-Overpass query and allows partial results.
+        if "towers" in layers:
+            try:
+                towers = osm.fetch_power_nodes_tiled(place, "tower", feedback, cache_dir)
+                data["elements"] = data.get("elements", []) + towers.get("elements", [])
+            except Exception as exc:  # noqa: BLE001
+                feedback.pushWarning(tr(f"Transmission towers skipped - optional OSM download failed: {exc}"))
+        if "poles" in layers:
+            try:
+                poles = osm.fetch_power_nodes_tiled(place, "pole", feedback, cache_dir)
+                data["elements"] = data.get("elements", []) + poles.get("elements", [])
+            except Exception as exc:  # noqa: BLE001
+                feedback.pushWarning(tr(f"Distribution poles skipped - optional OSM download failed: {exc}"))
         elements = data.get("elements", [])
         feedback.pushInfo(tr(f"{len(elements):,} OpenStreetMap features downloaded"))
-        clip_needed = place.get("osm_type") is None  # bbox query -> clip to the polygon
+        # Always clip to the real boundary. Core area queries are already restricted,
+        # but optional tower/pole queries use bbox cells and can include nearby nodes.
         self._area_geom = area  # the engine keeps a pointer to it
         engine = QgsGeometry.createGeometryEngine(self._area_geom.constGet())
         engine.prepareGeometry()
 
         def inside(geom):
-            return (not clip_needed) or engine.intersects(geom.constGet())
+            return engine.intersects(geom.constGet())
 
         line_f = QgsFields()
         for n, k, ln in (("osm_id", "long", 0), ("power", "string", 16), ("voltage_kv", "double", 8),
@@ -359,10 +420,10 @@ class MapGrid(QgsProcessingAlgorithm):
         for n, k, ln in (("osm_id", "long", 0), ("name", "string", 120), ("plant_source", "string", 40),
                          ("output", "string", 40), ("operator", "string", 80), ("source", "string", 20)):
             plant_f.append(make_field(n, k, ln))
-        tower_f = QgsFields()
+        structure_f = QgsFields()
         for n, k, ln in (("osm_id", "long", 0), ("power", "string", 10), ("ref", "string", 40),
                          ("operator", "string", 80), ("source", "string", 20)):
-            tower_f.append(make_field(n, k, ln))
+            structure_f.append(make_field(n, k, ln))
 
         s_lines, d_lines = self._sink(parameters, self.OUT_LINES, context, line_f, WKB_LINESTRING, WGS84) \
             if "lines" in layers else (None, None)
@@ -370,10 +431,12 @@ class MapGrid(QgsProcessingAlgorithm):
             if "substations" in layers else (None, None)
         s_plants, d_plants = self._sink(parameters, self.OUT_PLANTS, context, plant_f, WKB_POINT, WGS84) \
             if "plants" in layers else (None, None)
-        s_towers, d_towers = self._sink(parameters, self.OUT_TOWERS, context, tower_f, WKB_POINT, WGS84) \
+        s_towers, d_towers = self._sink(parameters, self.OUT_TOWERS, context, structure_f, WKB_POINT, WGS84) \
             if "towers" in layers else (None, None)
+        s_poles, d_poles = self._sink(parameters, self.OUT_POLES, context, structure_f, WKB_POINT, WGS84) \
+            if "poles" in layers else (None, None)
 
-        n_lines = n_subs = n_plants = n_towers = 0
+        n_lines = n_subs = n_plants = n_towers = n_poles = 0
         line_km = 0.0
         towns, osm_sub_pts = [], []
         node_degree = {}
@@ -442,24 +505,35 @@ class MapGrid(QgsProcessingAlgorithm):
                 s_plants.addFeature(f, FAST_INSERT)
                 n_plants += 1
             elif kind == "tower" and s_towers is not None:
-                f = QgsFeature(tower_f)
+                f = QgsFeature(structure_f)
                 f.setGeometry(pt)
                 f.setAttributes([el["id"], tags.get("power"), tags.get("ref"), tags.get("operator"),
                                  "OpenStreetMap"])
                 s_towers.addFeature(f, FAST_INSERT)
                 n_towers += 1
+            elif kind == "pole" and s_poles is not None:
+                f = QgsFeature(structure_f)
+                f.setGeometry(pt)
+                f.setAttributes([el["id"], tags.get("power"), tags.get("ref"), tags.get("operator"),
+                                 "OpenStreetMap"])
+                s_poles.addFeature(f, FAST_INSERT)
+                n_poles += 1
         feedback.pushInfo(tr(
             f"OSM grid: {n_lines:,} line sections ({line_km:,.0f} km), {len(osm_sub_pts):,} substations, "
-            f"{n_plants:,} plants, {n_towers:,} towers/poles, {len(towns):,} towns"))
+            f"{n_plants:,} plants, {n_towers:,} towers, {n_poles:,} poles, {len(towns):,} towns"))
 
-        results = self._results = {"N_LINES": n_lines, "LINE_KM": round(line_km, 1), "N_OSM_SUBSTATIONS": len(osm_sub_pts),
-                   "N_TOWERS": n_towers, "N_PLANTS": n_plants, "N_AI": 0, "N_AI_NEW": 0, "TILES": 0}
+        results = self._results = {"N_LINES": n_lines, "LINE_KM": round(line_km, 1),
+                   "N_OSM_SUBSTATIONS": len(osm_sub_pts), "N_TOWERS": n_towers, "N_POLES": n_poles,
+                   "N_PLANTS": n_plants, "N_AI": 0, "N_AI_NEW": 0, "TILES": 0}
         for key, dest in ((self.OUT_LINES, d_lines), (self.OUT_OSM_SUBS, d_subs), (self.OUT_PLANTS, d_plants),
-                          (self.OUT_TOWERS, d_towers)):
+                          (self.OUT_TOWERS, d_towers), (self.OUT_POLES, d_poles)):
             if dest:
                 results[key] = dest
 
         if "substations" not in layers:
+            return results
+        if not ai_ready and not estimate_only:
+            feedback.pushInfo(tr("AI scan skipped - returning the OpenStreetMap grid successfully."))
             return results
 
         # 3 -- scan zones ---------------------------------------------------
@@ -536,10 +610,9 @@ class MapGrid(QgsProcessingAlgorithm):
         }
         if self._detector_kind == "tflite":
             model = self.parameterAsFile(parameters, self.MODEL, context)
-            if not model:
-                raise QgsProcessingException(tr("Select the TFLite model (custom_model_lite.zip), or choose "
-                                                 "'No AI scan'."))
-            child_params["MODEL"] = model
+            if model:
+                child_params["MODEL"] = model
+            # If omitted, DetectSubstationsTFLite uses the safely promoted active model registry.
         else:
             child_params.update({"MODEL_ID": self.parameterAsString(parameters, self.RF_MODEL, context),
                                  "VERSION": self.parameterAsInt(parameters, self.RF_VERSION, context),
@@ -596,7 +669,7 @@ class MapGrid(QgsProcessingAlgorithm):
 
     def postProcessAlgorithm(self, context, feedback):  # noqa: N802
         styles = {self.OUT_LINES: "lines", self.OUT_OSM_SUBS: "osm_subs", self.OUT_TOWERS: "towers",
-                  self.OUT_PLANTS: "plants", self.OUT_AI: "ai", self.OUT_ZONES: "zones"}
+                  self.OUT_POLES: "poles", self.OUT_PLANTS: "plants", self.OUT_AI: "ai", self.OUT_ZONES: "zones"}
         for layer_id in list(context.layersToLoadOnCompletion().keys()):
             details = context.layerToLoadOnCompletionDetails(layer_id)
             kind = styles.get(details.outputName)

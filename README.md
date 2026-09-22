@@ -49,12 +49,15 @@ If a runtime is missing the plugin shows this command with your numpy version fi
 **Recommended – train an Apache-designated RF-DETR model with the training notebook in the source repository**
 [`GridMapper_RF-DETR_training.ipynb`](https://github.com/MugambiD/qgis-grid-mapper/blob/main/notebooks/GridMapper_RF-DETR_training.ipynb) – open it in Google Colab (GPU runtime) and *Run all*. The notebook is kept in the source repository rather than the official QGIS install ZIP. It:
 
-1. builds one COCO dataset from any mix of your Roboflow project (`ss-2`), the thesis Drive folders (TensorFlow CSV) and chips from *Extract training chips* (Pascal VOC);
-2. fine-tunes RF-DETR (`TASK = "detect"` for boxes, `"segment"` for true footprints – needs polygon labels, e.g. the Roboflow *COCO Segmentation* export);
-3. reports built-in RF-DETR metrics plus fixed-threshold precision/recall/F1 and per-geography F1;
-4. saves `gridmapper_…zip` (ONNX + class names + promotion metadata) and the best `.pth` checkpoint to Google Drive.
+1. optionally bootstraps from AllenAI **SatlasPretrain** high-resolution `power_substation` polygons and hard negatives, then combines them with your Roboflow project (`ss-2`), thesis Drive folders, older chips and QGIS feedback snapshots;
+2. converts Satlas zoom-13/8192 px polygons into the corresponding 512 px NAIP child chips without treating unannotated tiles as negatives;
+3. fine-tunes RF-DETR with the aerial-imagery augmentation preset (`TASK = "detect"` for boxes or `"segment"` for true footprints);
+4. reports built-in RF-DETR metrics plus fixed-threshold precision/recall/F1 and per-geography F1;
+5. saves `gridmapper_…zip` (ONNX + class names + promotion metadata) and the best `.pth` checkpoint to Google Drive.
 
 For later training rounds, keep the baseline sources enabled, add the latest immutable QGIS feedback snapshot to `GRIDMAPPER_SNAPSHOT_DIRS`, and optionally warm-start with `RESUME_CHECKPOINT`. This replay + fine-tune approach reduces catastrophic forgetting. Select the candidate zip directly in QGIS – no unzipping needed.
+
+For Satlas setup and provenance/licensing notes see [`docs/SATLAS_BOOTSTRAP.md`](docs/SATLAS_BOOTSTRAP.md). The raw Satlas distribution is archive-based; Grid Mapper only ingests selected substation chips after extraction.
 
 **Thesis TFLite models**
 * SSD-MobileNet-V2-FPNLite-320: `Thesis/3_SSD-Mobilenet V2-FPN Model/custom_model_lite.zip` on Google Drive.

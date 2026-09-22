@@ -35,6 +35,7 @@ SRC_POINT = _pick((Qgis, "ProcessingSourceType.VectorPoint"), (QgsProcessing, "T
 SRC_ANY = _pick((Qgis, "ProcessingSourceType.VectorAnyGeometry"), (QgsProcessing, "TypeVectorAnyGeometry"))
 
 FILE_BEHAVIOR = _pick((Qgis, "ProcessingFileParameterBehavior.File"), (QgsProcessingParameterFile, "File"))
+FOLDER_BEHAVIOR = _pick((Qgis, "ProcessingFileParameterBehavior.Folder"), (QgsProcessingParameterFile, "Folder"))
 FIELD_NUMERIC = _pick((Qgis, "ProcessingFieldParameterDataType.Numeric"),
                       (QgsProcessingParameterField, "Numeric"))
 

@@ -8,39 +8,11 @@ from qgis.core import (
 
 from ..core import tiling
 from ..core.compat import NUM_INT
+from ..core.masks import mask_to_polygons  # noqa: F401 (re-exported for tests)
 from ..core.roboflow_client import RoboflowClient
 from .base_detect import BaseDetectionAlgorithm, gsd_center_note, tr
 
 TASKS = ["detect", "instance", "semantic"]
-
-
-def mask_to_polygons(mask, keep_values, scale_x, scale_y, min_pixels=20):
-    """Vectorise class pixels of a mask into pixel-space rings using GDAL."""
-    from osgeo import gdal, ogr
-
-    binary = np.isin(mask, list(keep_values)).astype(np.uint8)
-    if binary.sum() < min_pixels:
-        return []
-    h, w = binary.shape
-    ds = gdal.GetDriverByName("MEM").Create("", w, h, 1, gdal.GDT_Byte)
-    ds.SetGeoTransform((0, 1, 0, 0, 0, 1))  # map coords == pixel coords
-    band = ds.GetRasterBand(1)
-    band.WriteArray(binary)
-    drv = ogr.GetDriverByName("MEM") or ogr.GetDriverByName("Memory")  # GDAL >= 3.11 / older
-    vds = drv.CreateDataSource("mask")
-    lyr = vds.CreateLayer("poly", geom_type=ogr.wkbPolygon)
-    lyr.CreateField(ogr.FieldDefn("v", ogr.OFTInteger))
-    gdal.Polygonize(band, band, lyr, 0, [], callback=None)
-    rings = []
-    for feat in lyr:
-        geom = feat.GetGeometryRef()
-        if geom is None or feat.GetField("v") != 1 or geom.GetArea() < min_pixels:
-            continue
-        geom = geom.SimplifyPreserveTopology(1.0)
-        outer = geom.GetGeometryRef(0)
-        rings.append([(outer.GetX(i) * scale_x, outer.GetY(i) * scale_y)
-                      for i in range(outer.GetPointCount())])
-    return rings
 
 
 class DetectSubstationsRoboflow(BaseDetectionAlgorithm):

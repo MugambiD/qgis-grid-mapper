@@ -16,12 +16,16 @@ MENU_TITLE = "&Grid Mapper"
 
 ACTIONS = [
     ("map_grid", "Map the grid (type a place)…", True),
-    ("detect_tflite", "Detect substations (TFLite model)…", True),
+    ("country_scan", "Scan an entire country (resumable)…", True),
+    ("detect_tflite", "Detect substations (local model: ONNX / TFLite)…", True),
+    ("prioritise_review", "Prioritise detections for review…", True),
+    ("collect_feedback", "Capture reviewed feedback for learning…", True),
+    ("export_feedback_dataset", "Export continual-learning dataset snapshot…", False),
+    ("register_candidate_model", "Register / safely promote a candidate model…", False),
     ("detect_roboflow", "Detect substations (Roboflow API)…", False),
     ("extract_chips", "Extract training chips around substations…", False),
     ("validate_detections", "Validate detections against reference…", False),
 ]
-
 
 class GridMapperPlugin:
     def __init__(self, iface):
