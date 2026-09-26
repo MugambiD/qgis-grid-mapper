@@ -1,6 +1,6 @@
 # Grid Mapper – Substation Detector (QGIS plugin)
 
-**Public release: v1.5.0** — resumable country-scale scanning, persistent grid databases, and independent OSM/AI segment queues.
+**Public release: v1.5.1** — security hardening for resumable country scanning and AI mapping. See [release notes](RELEASE_NOTES_v1.5.1.md).
 
 QGIS Processing tools that turn the MSc Data Science thesis
 *"Investigating the use of Deep learning tools to Map substations in Kenya"*
@@ -197,3 +197,21 @@ grid_mapper/
 ```
 
 Licence: GPL-2.0-or-later (as required for QGIS plugins).
+
+## Repository layout and checks
+
+`grid_mapper/` is the canonical QGIS plugin package. Root documentation, `scripts/`, `notebooks/` and `.github/` support development and releases. Build the installable ZIP with `python scripts/build_release.py`; do not zip the whole repository.
+
+Install development checks with `python -m pip install -r requirements-dev.txt`, then run:
+
+```sh
+python -m compileall -q grid_mapper
+python -m unittest discover -s grid_mapper/tests -v
+python scripts/build_release.py --check-only
+python -m bandit -r grid_mapper
+python -m detect_secrets scan --no-verify > .secrets-report.json
+python scripts/check_secrets.py .secrets-report.json
+python scripts/build_release.py
+```
+
+Both pull-request checks and release builds run the security checks. Secret scanning covers tracked repository files and fails if it finds a potential secret.

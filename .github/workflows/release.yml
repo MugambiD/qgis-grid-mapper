@@ -16,8 +16,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install test dependencies
-        run: python -m pip install pillow
+      - name: Install test and security dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Scan plugin with Bandit
+        run: python -m bandit -r grid_mapper
+      - name: Scan tracked files for secrets
+        run: |
+          python -m detect_secrets scan --no-verify > .secrets-report.json
+          python scripts/check_secrets.py .secrets-report.json
       - name: Test
         run: |
           python -m compileall -q grid_mapper

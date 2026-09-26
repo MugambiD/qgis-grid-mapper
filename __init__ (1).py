@@ -1,1 +1,0 @@
-"""Grid Mapper core helpers."""
