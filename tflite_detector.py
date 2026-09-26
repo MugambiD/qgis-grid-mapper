@@ -30,17 +30,20 @@ def install_help():
 
 def load_interpreter_class():
     """Return (Interpreter class, backend name)."""
+    errors = []
     for mod_name in ("ai_edge_litert.interpreter", "tflite_runtime.interpreter"):
         try:
             mod = importlib.import_module(mod_name)
             return mod.Interpreter, mod_name.split(".")[0]
-        except Exception:  # noqa: BLE001 - try the next backend
-            continue
+        except Exception as exc:  # noqa: BLE001 - try the next backend
+            errors.append(f"{mod_name}: {exc}")
     try:
         import tensorflow as tf  # noqa: WPS433
         return tf.lite.Interpreter, "tensorflow"
     except Exception as exc:  # noqa: BLE001
-        raise ImportError(install_help()) from exc
+        errors.append(f"tensorflow: {exc}")
+        detail = "\n".join(f"  - {e}" for e in errors)
+        raise ImportError(f"{install_help()}\n\nBackends tried:\n{detail}") from exc
 
 
 def resolve_model(path, cache_dir):
@@ -52,7 +55,7 @@ def resolve_model(path, cache_dir):
         folder = path
     elif path.lower().endswith(".zip"):
         with open(path, "rb") as fh:
-            digest = hashlib.md5(fh.read()).hexdigest()[:12]  # noqa: S324 - cache key only
+            digest = hashlib.sha256(fh.read()).hexdigest()[:12]  # cache key only
         folder = os.path.join(cache_dir, digest)
         if not os.path.isdir(folder):
             os.makedirs(folder, exist_ok=True)

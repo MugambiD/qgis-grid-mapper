@@ -116,7 +116,7 @@ def bbox_tiles(place_info, cell_deg=0.35):
 
 def _cache_path(cache_dir, query):
     import hashlib
-    return os.path.join(cache_dir, hashlib.md5(query.encode()).hexdigest() + ".json")  # noqa: S324
+    return os.path.join(cache_dir, hashlib.sha256(query.encode()).hexdigest()[:32] + ".json")
 
 
 def overpass(query, feedback=None, cache_dir=None, label="grid data", attempts_per_mirror=2,

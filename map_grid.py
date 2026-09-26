@@ -145,7 +145,7 @@ class MapGrid(QgsProcessingAlgorithm):
     MODEL = "MODEL"
     RF_MODEL = "RF_MODEL"
     RF_VERSION = "RF_VERSION"
-    API_KEY = "API_KEY"
+    KEY_PARAM = "API_KEY"  # Processing parameter id for the optional Roboflow key
     TOWN_RADIUS = "TOWN_RADIUS"
     NODE_RADIUS = "NODE_RADIUS"
     KNOWN_RADIUS = "KNOWN_RADIUS"
@@ -223,7 +223,7 @@ class MapGrid(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterFile(
             self.MODEL, tr("Local model (.onnx, .tflite or model .zip)"),
             behavior=FILE_BEHAVIOR, fileFilter="Detection model (*.onnx *.zip *.tflite)", optional=True))
-        self.addParameter(QgsProcessingParameterString(self.API_KEY, tr("Roboflow API key (optional; prefer ROBOFLOW_API_KEY env var)"), "", optional=True))
+        self.addParameter(QgsProcessingParameterString(self.KEY_PARAM, tr("Roboflow API key (optional; prefer ROBOFLOW_API_KEY env var)"), "", optional=True))
         self.addParameter(QgsProcessingParameterBoolean(
             self.ESTIMATE_ONLY, tr("Estimate only (download OSM data and count tiles, no AI scan)"), False))
         self.addParameter(advanced(QgsProcessingParameterString(self.RF_MODEL, tr("Roboflow model ID"), "ss-2")))
@@ -318,7 +318,7 @@ class MapGrid(QgsProcessingAlgorithm):
                         "No local AI model is configured. Grid Mapper will return the OpenStreetMap grid "
                         "instead of failing. Select a model or register an active model to enable AI."))
         if ai_ready and self._detector_kind == "roboflow" and not estimate_only:
-            key = self.parameterAsString(parameters, self.API_KEY, context) or os.environ.get("ROBOFLOW_API_KEY", "")
+            key = self.parameterAsString(parameters, self.KEY_PARAM, context) or os.environ.get("ROBOFLOW_API_KEY", "")
             if not key:
                 ai_ready = False
                 feedback.pushWarning(tr(
@@ -616,7 +616,7 @@ class MapGrid(QgsProcessingAlgorithm):
         else:
             child_params.update({"MODEL_ID": self.parameterAsString(parameters, self.RF_MODEL, context),
                                  "VERSION": self.parameterAsInt(parameters, self.RF_VERSION, context),
-                                 "API_KEY": self.parameterAsString(parameters, self.API_KEY, context),
+                                 "API_KEY": self.parameterAsString(parameters, self.KEY_PARAM, context),
                                  "TASK": 0})
         child_res = self._child.processAlgorithm(child_params, context, multi)
         det_layer = QgsProcessingUtils.mapLayerFromString(child_res["OUTPUT"], context)

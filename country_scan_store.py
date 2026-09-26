@@ -14,6 +14,35 @@ from datetime import datetime, timezone
 
 SCHEMA_VERSION = 1
 
+# Every statement below is a fixed string: the only values that vary between
+# runs (attempt ceiling, row limit) are bound as SQL parameters.
+_LIMIT_CLAUSE = " LIMIT ?"
+
+_OSM_QUEUE_SQL = (
+    "SELECT q.* FROM segments q WHERE q.status IN ('pending','retry') AND q.attempts < ? "
+    "ORDER BY CASE q.status WHEN 'retry' THEN 0 WHEN 'failed' THEN 1 ELSE 2 END, q.segment_id"
+)
+_OSM_QUEUE_WITH_FAILED_SQL = (
+    "SELECT q.* FROM segments q WHERE q.status IN ('pending','retry','failed') AND q.attempts < ? "
+    "ORDER BY CASE q.status WHEN 'retry' THEN 0 WHEN 'failed' THEN 1 ELSE 2 END, q.segment_id"
+)
+_AI_QUEUE_SQL = (
+    "SELECT a.*, s.row_idx,s.col_idx,s.west,s.south,s.east,s.north "
+    "FROM ai_segments a JOIN segments s ON s.segment_id=a.segment_id "
+    "WHERE s.status='done' AND a.status IN ('pending','retry') AND a.attempts < ? "
+    "ORDER BY CASE a.status WHEN 'retry' THEN 0 WHEN 'failed' THEN 1 ELSE 2 END, a.segment_id"
+)
+_AI_QUEUE_WITH_FAILED_SQL = (
+    "SELECT a.*, s.row_idx,s.col_idx,s.west,s.south,s.east,s.north "
+    "FROM ai_segments a JOIN segments s ON s.segment_id=a.segment_id "
+    "WHERE s.status='done' AND a.status IN ('pending','retry','failed') AND a.attempts < ? "
+    "ORDER BY CASE a.status WHEN 'retry' THEN 0 WHEN 'failed' THEN 1 ELSE 2 END, a.segment_id"
+)
+_STATUS_COUNT_SQL = {
+    "segments": "SELECT status,COUNT(*) FROM segments GROUP BY status",
+    "ai_segments": "SELECT status,COUNT(*) FROM ai_segments GROUP BY status",
+}
+
 
 def utc_now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -158,37 +187,21 @@ class CountryScanStore:
         return a + b
 
     @staticmethod
-    def _queue_sql(table, statuses, limit, max_attempts, extra=""):
-        marks = ",".join("?" for _ in statuses)
-        sql = (
-            f"SELECT q.* FROM {table} q {extra} WHERE q.status IN ({marks}) AND q.attempts < ? "
-            "ORDER BY CASE q.status WHEN 'retry' THEN 0 WHEN 'failed' THEN 1 ELSE 2 END, q.segment_id"
-        )
-        args = list(statuses) + [int(max_attempts)]
+    def _queue(conn, sql, limit, max_attempts):
+        """Run one of the fixed queue statements above."""
+        args = [int(max_attempts)]
         if int(limit) > 0:
-            sql += " LIMIT ?"
+            sql = sql + _LIMIT_CLAUSE
             args.append(int(limit))
-        return sql, args
+        return [dict(r) for r in conn.execute(sql, args).fetchall()]
 
     def next_segments(self, limit=0, retry_failed=True, max_attempts=5):
-        statuses = ["pending", "retry"] + (["failed"] if retry_failed else [])
-        sql, args = self._queue_sql("segments", statuses, limit, max_attempts)
-        return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+        sql = _OSM_QUEUE_WITH_FAILED_SQL if retry_failed else _OSM_QUEUE_SQL
+        return self._queue(self.conn, sql, limit, max_attempts)
 
     def next_ai_segments(self, limit=0, retry_failed=True, max_attempts=5):
-        statuses = ["pending", "retry"] + (["failed"] if retry_failed else [])
-        marks = ",".join("?" for _ in statuses)
-        sql = (
-            "SELECT a.*, s.row_idx,s.col_idx,s.west,s.south,s.east,s.north "
-            "FROM ai_segments a JOIN segments s ON s.segment_id=a.segment_id "
-            f"WHERE s.status='done' AND a.status IN ({marks}) AND a.attempts < ? "
-            "ORDER BY CASE a.status WHEN 'retry' THEN 0 WHEN 'failed' THEN 1 ELSE 2 END, a.segment_id"
-        )
-        args = statuses + [int(max_attempts)]
-        if int(limit) > 0:
-            sql += " LIMIT ?"
-            args.append(int(limit))
-        return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+        sql = _AI_QUEUE_WITH_FAILED_SQL if retry_failed else _AI_QUEUE_SQL
+        return self._queue(self.conn, sql, limit, max_attempts)
 
     def mark_running(self, segment_id):
         now = utc_now()
@@ -262,7 +275,7 @@ class CountryScanStore:
 
     @staticmethod
     def _counts(conn, table):
-        return {r[0]: int(r[1]) for r in conn.execute(f"SELECT status,COUNT(*) FROM {table} GROUP BY status")}
+        return {r[0]: int(r[1]) for r in conn.execute(_STATUS_COUNT_SQL[table])}
 
     def summary(self):
         total = int(self.conn.execute("SELECT COUNT(*) FROM segments").fetchone()[0])

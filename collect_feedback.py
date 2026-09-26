@@ -1,6 +1,7 @@
 """Capture reviewed detections and misses as persistent continual-learning samples."""
 import os
-from xml.sax.saxutils import escape
+
+from ..core.xmltext import escape
 
 from qgis.core import (
     QgsCoordinateTransform,

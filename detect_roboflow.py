@@ -18,7 +18,7 @@ TASKS = ["detect", "instance", "semantic"]
 class DetectSubstationsRoboflow(BaseDetectionAlgorithm):
     MODEL_ID = "MODEL_ID"
     VERSION = "VERSION"
-    API_KEY = "API_KEY"
+    KEY_PARAM = "API_KEY"  # Processing parameter id for the optional Roboflow key
     TASK = "TASK"
     BASE_URL = "BASE_URL"
 
@@ -49,7 +49,7 @@ class DetectSubstationsRoboflow(BaseDetectionAlgorithm):
         self.addParameter(QgsProcessingParameterString(self.MODEL_ID, tr("Roboflow model ID"), "ss-2"))
         self.addParameter(QgsProcessingParameterNumber(
             self.VERSION, tr("Model version"), NUM_INT, 1, minValue=1))
-        self.addParameter(QgsProcessingParameterString(self.API_KEY, tr("Roboflow API key"), "",
+        self.addParameter(QgsProcessingParameterString(self.KEY_PARAM, tr("Roboflow API key"), "",
                                                        optional=True))
         self.addParameter(QgsProcessingParameterEnum(
             self.TASK, tr("Model type"),
@@ -64,7 +64,7 @@ class DetectSubstationsRoboflow(BaseDetectionAlgorithm):
             self.client = RoboflowClient(
                 self.parameterAsString(parameters, self.MODEL_ID, context),
                 self.parameterAsInt(parameters, self.VERSION, context),
-                self.parameterAsString(parameters, self.API_KEY, context),
+                self.parameterAsString(parameters, self.KEY_PARAM, context),
                 task=task,
                 base_url=self.parameterAsString(parameters, self.BASE_URL, context),
                 confidence=self.parameterAsDouble(parameters, self.SCORE, context),

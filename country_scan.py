@@ -156,7 +156,7 @@ class CountryScan(QgsProcessingAlgorithm):
     MODEL = "MODEL"
     RF_MODEL = "RF_MODEL"
     RF_VERSION = "RF_VERSION"
-    API_KEY = "API_KEY"
+    KEY_PARAM = "API_KEY"  # Processing parameter id for the optional Roboflow key
     GSD = "GSD"
     SCORE = "SCORE"
     TOWN_RADIUS = "TOWN_RADIUS"
@@ -237,7 +237,7 @@ class CountryScan(QgsProcessingAlgorithm):
         self.addParameter(advanced(QgsProcessingParameterString(self.RF_MODEL, tr("Roboflow model ID"), "ss-2")))
         self.addParameter(advanced(QgsProcessingParameterNumber(
             self.RF_VERSION, tr("Roboflow model version"), NUM_INT, 1, minValue=1)))
-        self.addParameter(QgsProcessingParameterString(self.API_KEY, tr("Roboflow API key"), "", optional=True))
+        self.addParameter(QgsProcessingParameterString(self.KEY_PARAM, tr("Roboflow API key"), "", optional=True))
         self.addParameter(advanced(QgsProcessingParameterNumber(
             self.GSD, tr("AI ground resolution (m/px)"), NUM_DOUBLE, 0.6, minValue=0.1, maxValue=5)))
         self.addParameter(advanced(QgsProcessingParameterNumber(
@@ -280,7 +280,7 @@ class CountryScan(QgsProcessingAlgorithm):
                 )
                 return True
         elif self._ai_kind == "roboflow":
-            key = self.parameterAsString(parameters, self.API_KEY, context) or os.environ.get("ROBOFLOW_API_KEY", "")
+            key = self.parameterAsString(parameters, self.KEY_PARAM, context) or os.environ.get("ROBOFLOW_API_KEY", "")
             if not key:
                 self._ai_skip_reason = (
                     "AI queue skipped: Roboflow was selected but no API key is configured. "
@@ -547,7 +547,7 @@ class CountryScan(QgsProcessingAlgorithm):
             child_params.update({
                 "MODEL_ID": self.parameterAsString(parameters, self.RF_MODEL, context),
                 "VERSION": self.parameterAsInt(parameters, self.RF_VERSION, context),
-                "API_KEY": self.parameterAsString(parameters, self.API_KEY, context),
+                "API_KEY": self.parameterAsString(parameters, self.KEY_PARAM, context),
                 "TASK": 0,
             })
         child_res = self._child.processAlgorithm(child_params, context, feedback)
@@ -561,7 +561,7 @@ class CountryScan(QgsProcessingAlgorithm):
             g.transform(to_wgs)
             if g.isEmpty():
                 continue
-            digest = hashlib.sha1(g.asWkt(5).encode("utf-8")).hexdigest()[:16]  # noqa: S324
+            digest = hashlib.sha256(g.asWkt(5).encode("utf-8")).hexdigest()[:16]
             key = f"ai:{row['segment_id']}:{digest}"
             if store.asset_seen(key):
                 continue
