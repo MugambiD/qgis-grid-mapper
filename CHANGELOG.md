@@ -12,6 +12,18 @@ Security-scan hardening, in response to the official QGIS plugin repository's au
 
 Note: because sample ids and split buckets are hashed differently, feedback captured by 1.5.1 will not deduplicate against samples captured by 1.5.0. Existing records keep the split recorded with them.
 
+## 1.5.1
+
+Security-scan hardening, in response to the official QGIS plugin repository's automated scan (Bandit and detect-secrets). No behaviour of the mapping tools changes.
+
+- Replaced the `xml.sax.saxutils` import with a small built-in XML text escaper (`core/xmltext.py`): the plugin writes label XML but never parses untrusted XML.
+- Cache and dataset keys now use SHA-256 instead of MD5/SHA-1 (OSM query cache, model zip cache, AI detection dedup, feedback sample ids and dataset splits).
+- Country-scan queue lookups are now fixed SQL statements with bound parameters only; no query text is assembled from variables.
+- TFLite backend probing collects and reports why each runtime failed instead of silently continuing.
+- Renamed the Roboflow key class constants to `KEY_PARAM`; the Processing parameter id stays `API_KEY`, so existing models and scripts keep working.
+
+Note: because sample ids and split buckets are hashed differently, feedback captured by 1.5.1 will not deduplicate against samples captured by 1.5.0. Existing records keep the split recorded with them.
+
 ## 1.5.0
 
 Country-scale, resumable scanning:
