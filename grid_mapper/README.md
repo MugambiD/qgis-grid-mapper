@@ -1,6 +1,6 @@
 # Grid Mapper – Substation Detector (QGIS plugin)
 
-**Public release: v1.5.0** — resumable country-scale scanning, persistent grid databases, and independent OSM/AI segment queues.
+**Version: v1.5.1** — security hardening for resumable country scanning and AI mapping. See [release notes](https://github.com/MugambiD/qgis-grid-mapper/blob/cleanup-v1.5.1/RELEASE_NOTES_v1.5.1.md).
 
 QGIS Processing tools that turn the MSc Data Science thesis
 *"Investigating the use of Deep learning tools to Map substations in Kenya"*
@@ -24,9 +24,26 @@ Results are polygon (and optional point) layers with `score`, `area_m2`, `length
 
 ---
 
+## What changed in v1.5.1
+
+- XML label output uses a small text escaper without importing an XML parser.
+- Plugin cache keys, detection deduplication, feedback IDs and dataset split buckets use SHA-256.
+- Country-scan queue queries use fixed SQL with bound parameters.
+- TFLite runtime probing reports why a backend could not load.
+- Roboflow tools retain the `API_KEY` Processing parameter for existing models and scripts.
+
+**Upgrading from v1.5.0:** existing feedback records keep their stored split. Newly captured feedback uses different sample IDs and will not deduplicate against v1.5.0 records. Older cache entries may be regenerated.
+
 ## 1. Install the plugin
 
-Download `grid_mapper-x.y.z.zip` from the [Releases](https://github.com/MugambiD/qgis-grid-mapper/releases) page (or zip the `grid_mapper` folder yourself).
+Download the installable plugin ZIP from [Releases](https://github.com/MugambiD/qgis-grid-mapper/releases). To build v1.5.1 from this source checkout, run the following from the repository root:
+
+```sh
+python scripts/build_release.py --check-only
+python scripts/build_release.py
+```
+
+The output is `dist/grid_mapper-1.5.1.zip`, containing one top-level `grid_mapper/` folder. GitHub's **Code → Download ZIP** archive is a source checkout; build the plugin ZIP before installing it in QGIS.
 
 1. QGIS 3.22 – 4.x. The metadata declares compatibility through QGIS 4.x with `qgisMaximumVersion=4.99`. If an older copy is installed, uninstall it first.
 2. *Plugins → Manage and Install Plugins → Install from ZIP* → choose the downloaded zip → **Install Plugin**.
@@ -57,7 +74,7 @@ If a runtime is missing the plugin shows this command with your numpy version fi
 
 For later training rounds, keep the baseline sources enabled, add the latest immutable QGIS feedback snapshot to `GRIDMAPPER_SNAPSHOT_DIRS`, and optionally warm-start with `RESUME_CHECKPOINT`. This replay + fine-tune approach reduces catastrophic forgetting. Select the candidate zip directly in QGIS – no unzipping needed.
 
-For Satlas setup and provenance/licensing notes see [`docs/SATLAS_BOOTSTRAP.md`](docs/SATLAS_BOOTSTRAP.md). The raw Satlas distribution is archive-based; Grid Mapper only ingests selected substation chips after extraction.
+For Satlas setup and provenance/licensing notes see [`docs/SATLAS_BOOTSTRAP.md`](https://github.com/MugambiD/qgis-grid-mapper/blob/main/docs/SATLAS_BOOTSTRAP.md). The raw Satlas distribution is archive-based; Grid Mapper only ingests selected substation chips after extraction.
 
 **Thesis TFLite models**
 * SSD-MobileNet-V2-FPNLite-320: `Thesis/3_SSD-Mobilenet V2-FPN Model/custom_model_lite.zip` on Google Drive.
@@ -177,7 +194,11 @@ The plugin ZIP contains no model weights or compiled AI runtimes. Optional Pytho
 ## 9. Files
 
 ```
-.github/workflows/release.yml   builds the installable zip on every v* tag
+.github/workflows/quality.yml   runs tests, Bandit and secrets checks
+.github/workflows/release.yml   checks and builds the installable ZIP on every v* tag
+scripts/build_release.py       validates and packages grid_mapper/
+scripts/check_secrets.py       fails CI when the secrets scan reports findings
+docs/                         Satlas bootstrap guide
 notebooks/                      Colab notebook to train RF-DETR and export for the plugin
 grid_mapper/
   metadata.txt, __init__.py, plugin.py, provider.py
@@ -191,8 +212,8 @@ grid_mapper/
   core/postprocess.py       cross-tile NMS
   core/osm.py, core/net.py  Nominatim / Overpass access
   core/compat.py            QGIS 3 / QGIS 4 (Qt6) compatibility
+  core/xmltext.py           XML label text escaping
   algorithms/               detection, active-learning, feedback, snapshot and model-registry tools
-  notebooks/                RF-DETR continual-learning Colab notebook
   docs/                     continual-learning workflow and model lifecycle
 ```
 
