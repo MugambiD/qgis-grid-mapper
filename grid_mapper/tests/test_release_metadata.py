@@ -17,7 +17,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         cp = configparser.ConfigParser()
         cp.read(self.metadata, encoding="utf-8")
         g = cp["general"]
-        self.assertEqual(g.get("version"), "1.5.0")
+        self.assertEqual(g.get("version"), "1.5.1")
         self.assertEqual(g.get("qgisMaximumVersion"), "4.99")
         self.assertNotIn("supportsqt6", {k.lower() for k in g.keys()})
         self.assertEqual(g.get("experimental"), "False")
