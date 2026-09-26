@@ -1,6 +1,6 @@
 # Grid Mapper – Substation Detector (QGIS plugin)
 
-**Public release: v1.5.0** — resumable country-scale scanning, persistent grid databases, and independent OSM/AI segment queues.
+**Version: v1.5.1** — security hardening for resumable country scanning and AI mapping. See [release notes](RELEASE_NOTES_v1.5.1.md).
 
 QGIS Processing tools that turn the MSc Data Science thesis
 *"Investigating the use of Deep learning tools to Map substations in Kenya"*
@@ -24,9 +24,26 @@ Results are polygon (and optional point) layers with `score`, `area_m2`, `length
 
 ---
 
+## What changed in v1.5.1
+
+- XML label output uses a small text escaper without importing an XML parser.
+- Plugin cache keys, detection deduplication, feedback IDs and dataset split buckets use SHA-256.
+- Country-scan queue queries use fixed SQL with bound parameters.
+- TFLite runtime probing reports why a backend could not load.
+- Roboflow tools retain the `API_KEY` Processing parameter for existing models and scripts.
+
+**Upgrading from v1.5.0:** existing feedback records keep their stored split. Newly captured feedback uses different sample IDs and will not deduplicate against v1.5.0 records. Older cache entries may be regenerated.
+
 ## 1. Install the plugin
 
-Download `grid_mapper-x.y.z.zip` from the [Releases](https://github.com/MugambiD/qgis-grid-mapper/releases) page (or zip the `grid_mapper` folder yourself).
+Download the installable plugin ZIP from [Releases](https://github.com/MugambiD/qgis-grid-mapper/releases). To build v1.5.1 from this source checkout, run the following from the repository root:
+
+```sh
+python scripts/build_release.py --check-only
+python scripts/build_release.py
+```
+
+The output is `dist/grid_mapper-1.5.1.zip`, containing one top-level `grid_mapper/` folder. GitHub's **Code → Download ZIP** archive is a source checkout; build the plugin ZIP before installing it in QGIS.
 
 1. QGIS 3.22 – 4.x. The metadata declares compatibility through QGIS 4.x with `qgisMaximumVersion=4.99`. If an older copy is installed, uninstall it first.
 2. *Plugins → Manage and Install Plugins → Install from ZIP* → choose the downloaded zip → **Install Plugin**.
@@ -157,11 +174,11 @@ The feedback store is append-only and contains georeferenced image chips, metada
 
 The model registry lives inside the QGIS profile under `grid_mapper/model_registry/`. Candidate packages are copied into versioned folders. The promotion gate prefers the model metadata's `primary_metric` (the supplied notebook exports `f1`) and also checks `geography_metrics`. A failed candidate stays registered for inspection but never replaces the current active model.
 
-See [`docs/CONTINUAL_LEARNING.md`](docs/CONTINUAL_LEARNING.md) for the detailed workflow.
+See [`docs/CONTINUAL_LEARNING.md`](grid_mapper/docs/CONTINUAL_LEARNING.md) for the detailed workflow.
 
 ## 7. Network services, privacy and licences
 
-Grid Mapper has no telemetry and does not send project data to the plugin author. Depending on the options selected, it contacts OpenStreetMap Nominatim/Overpass, the chosen imagery provider, and — only in Roboflow mode — Roboflow. Roboflow mode uploads rendered image tiles for inference. Local ONNX/TFLite inference stays on the user's computer. See [`docs/NETWORK_AND_PRIVACY.md`](docs/NETWORK_AND_PRIVACY.md).
+Grid Mapper has no telemetry and does not send project data to the plugin author. Depending on the options selected, it contacts OpenStreetMap Nominatim/Overpass, the chosen imagery provider, and — only in Roboflow mode — Roboflow. Roboflow mode uploads rendered image tiles for inference. Local ONNX/TFLite inference stays on the user's computer. See [`docs/NETWORK_AND_PRIVACY.md`](grid_mapper/docs/NETWORK_AND_PRIVACY.md).
 
 The plugin ZIP contains no model weights or compiled AI runtimes. Optional Python runtimes are installed separately into QGIS Python. Users are responsible for checking the licence and usage terms of their chosen models, imagery and hosted services.
 
@@ -177,7 +194,11 @@ The plugin ZIP contains no model weights or compiled AI runtimes. Optional Pytho
 ## 9. Files
 
 ```
-.github/workflows/release.yml   builds the installable zip on every v* tag
+.github/workflows/quality.yml   runs tests, Bandit and secrets checks
+.github/workflows/release.yml   checks and builds the installable ZIP on every v* tag
+scripts/build_release.py       validates and packages grid_mapper/
+scripts/check_secrets.py       fails CI when the secrets scan reports findings
+docs/                         Satlas bootstrap guide
 notebooks/                      Colab notebook to train RF-DETR and export for the plugin
 grid_mapper/
   metadata.txt, __init__.py, plugin.py, provider.py
@@ -191,9 +212,27 @@ grid_mapper/
   core/postprocess.py       cross-tile NMS
   core/osm.py, core/net.py  Nominatim / Overpass access
   core/compat.py            QGIS 3 / QGIS 4 (Qt6) compatibility
+  core/xmltext.py           XML label text escaping
   algorithms/               detection, active-learning, feedback, snapshot and model-registry tools
-  notebooks/                RF-DETR continual-learning Colab notebook
   docs/                     continual-learning workflow and model lifecycle
 ```
 
 Licence: GPL-2.0-or-later (as required for QGIS plugins).
+
+## Repository layout and checks
+
+`grid_mapper/` is the canonical QGIS plugin package. Root documentation, `scripts/`, `notebooks/` and `.github/` support development and releases. Build the installable ZIP with `python scripts/build_release.py`; do not zip the whole repository.
+
+Install development checks with `python -m pip install -r requirements-dev.txt`, then run:
+
+```sh
+python -m compileall -q grid_mapper
+python -m unittest discover -s grid_mapper/tests -v
+python scripts/build_release.py --check-only
+python -m bandit -r grid_mapper
+python -m detect_secrets scan --no-verify > .secrets-report.json
+python scripts/check_secrets.py .secrets-report.json
+python scripts/build_release.py
+```
+
+Both pull-request checks and release builds run the security checks. Secret scanning covers tracked repository files and fails if it finds a potential secret.
