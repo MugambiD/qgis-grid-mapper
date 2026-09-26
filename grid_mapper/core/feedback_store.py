@@ -47,7 +47,7 @@ def normalize_review(value):
 
 def sample_id_for(*parts):
     raw = "\x1f".join(str(p or "") for p in parts).encode("utf-8", "replace")
-    return hashlib.sha1(raw).hexdigest()[:20]
+    return hashlib.sha256(raw).hexdigest()[:20]
 
 
 def stable_split(key, valid_pct=10.0, test_pct=10.0):
@@ -59,7 +59,7 @@ def stable_split(key, valid_pct=10.0, test_pct=10.0):
     valid_pct, test_pct = float(valid_pct), float(test_pct)
     if valid_pct < 0 or test_pct < 0 or valid_pct + test_pct >= 100:
         raise ValueError("Validation/test percentages must be >= 0 and sum to less than 100")
-    bucket = int(hashlib.sha1(str(key).encode("utf-8", "replace")).hexdigest()[:8], 16) % 10000 / 100.0
+    bucket = int(hashlib.sha256(str(key).encode("utf-8", "replace")).hexdigest()[:8], 16) % 10000 / 100.0
     if bucket < test_pct:
         return "test"
     if bucket < test_pct + valid_pct:
