@@ -1,7 +1,8 @@
 import csv
 import os
 import re
-from xml.sax.saxutils import escape
+
+from ..core.xmltext import escape
 
 from qgis.core import (
     QgsCoordinateTransform,
